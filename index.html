@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 手勢神廚 - 混合實境遊戲</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        canvas { border: 4px solid #333; border-radius: 10px; }
+    </style>
+</head>
+<body>
+<script>
+let video;
+let hands;
+let predictions = [];
+let foods = [];
+let score = 0;
+let lastX, lastY; // 用於計算手速（切菜動作）
+
+function setup() {
+  createCanvas(640, 480);
+  
+  // 初始化攝像頭
+  video = createCapture(VIDEO);
+  video.size(640, 480);
+  video.hide();
+
+  // 初始化 MediaPipe Hands
+  hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults(onResults);
+
+  const camera = new Camera(video.elt, {
+    onFrame: async () => { await hands.send({image: video.elt}); },
+    width: 640,
+    height: 480
+  });
+  camera.start();
+}
+
+function onResults(results) {
+  predictions = results.multiHandLandmarks;
+}
+
+function draw() {
+  // 1. 繪製鏡像背景
+  push();
+  translate(width, 0);
+  scale(-1, 1);
+  image(video, 0, 0, width, height);
+  pop();
+
+  // 2. 隨機生成食材
+  if (frameCount % 60 === 0) {
+    foods.push(new Food());
+  }
+
+  // 3. 處理手勢邏輯
+  if (predictions && predictions.length > 0) {
+    let hand = predictions[0];
+    let indexFinger = hand[8]; // 食指尖
+    let thumb = hand[4];      // 拇指尖
+
+    let ix = (1 - indexFinger.x) * width;
+    let iy = indexFinger.y * height;
+    let tx = (1 - thumb.x) * width;
+    let ty = thumb.y * height;
+
+    let centerX = (ix + tx) / 2;
+    let centerY = (iy + ty) / 2;
+    let handSpeed = dist(centerX, centerY, lastX, lastY);
+    let isPinching = dist(ix, iy, tx, ty) < 40;
+
+    // 繪製手部指示器
+    noStroke();
+    fill(isPinching ? color(0, 255, 0) : color(255, 255, 0));
+    ellipse(centerX, centerY, 20, 20);
+
+    // 檢測切菜 (快速揮動且經過食材)
+    for (let f of foods) {
+      if (!f.isCut && handSpeed > 25 && dist(centerX, centerY, f.x, f.y) < 50) {
+        f.cut();
+        score += 10;
+      }
+    }
+
+    lastX = centerX;
+    lastY = centerY;
+  }
+
+  // 4. 更新與繪製食材
+  for (let i = foods.length - 1; i >= 0; i--) {
+    foods[i].update();
+    foods[i].display();
+    if (foods[i].y > height + 50) foods.splice(i, 1);
+  }
+
+  // 5. 顯示 UI
+  drawUI();
+}
+
+class Food {
+  constructor() {
+    this.x = random(100, width - 100);
+    this.y = -50;
+    this.speed = random(2, 5);
+    this.isCut = false;
+    this.type = random(['🥚', '🍅', '🍞']);
+    this.rot = random(TWO_PI);
+  }
+
+  update() {
+    this.y += this.speed;
+    this.rot += 0.05;
+  }
+
+  cut() {
+    this.isCut = true;
+    this.speed = 8; // 切開後加速掉落
+  }
+
+  display() {
+    push();
+    translate(this.x, this.y);
+    rotate(this.rot);
+    textSize(50);
+    textAlign(CENTER, CENTER);
+    
+    if (this.isCut) {
+      // 顯示切開的效果 (分裂成兩半)
+      text(this.type, -15, 0);
+      text(this.type, 15, 0);
+      stroke(255, 0, 0);
+      strokeWeight(4);
+      line(-30, 0, 30, 0);
+    } else {
+      text(this.type, 0, 0);
+    }
+    pop();
+  }
+}
+
+function drawUI() {
+  fill(0, 150);
+  rect(10, 10, 150, 50, 10);
+  fill(255);
+  textSize(24);
+  text(`得分: ${score}`, 25, 45);
+  
+  if (!predictions || predictions.length === 0) {
+    fill(255, 255, 0);
+    textAlign(CENTER);
+    text("請揮動手掌開始切菜！", width/2, height - 30);
+  }
+}
+</script>
+</body>
+</html>
